@@ -1,284 +1,203 @@
 """
-GenAI Accounting Analytics Toolkit — Predictive Analytics Module
-File: predictive-app/app.py
+GenAI Accounting Analytics Toolkit — Predictive Analytics Dashboard
+Live Efficient Frontier powered by editable return data.
 
-Author(s): Alastair McBride & GenAI Assistant
+This dashboard recalculates:
+- Expected return
+- Standard deviation
+- Correlation
+- Portfolio risk across weightings
+and updates the chart instantly.
 
-Purpose:
-    Demonstrates Modern Portfolio Theory (MPT) with two risky assets
-    using annual return data (default from Watson & Head, 2023,
-    Corporate Finance, 8th Edition).
-
-    The app:
-        - Accepts 5 years of returns for assets S and T
-        - Computes mean returns, standard deviations, and correlation
-        - Evaluates a set of portfolio weightings
-        - Calculates portfolio variance and standard deviation
-        - Plots a simple efficient frontier diagram
-        - Provides a "Methodology & Notes" section suitable for
-          academic or professional documentation.
-
-Prompt provenance (human instruction, summarised):
-    The human user requested three Streamlit projects (descriptive,
-    predictive, prescriptive) with a unified, branded look, and asked
-    that documentation include the prompts that generated the code.
-    The original predictive example code was supplied by the user and
-    refactored  into this academic-themed module.
-
-    Full prompt text is recorded separately in docs/prompt_record.md.
+Author: Alastair McBride & GenAI Assistant
 """
 
 # ──────────────────────────────────────────────────────────────
-# FIX FOR STREAMLIT CLOUD PATHS
+# PATH FIX FOR SHARED MODULES
 # ──────────────────────────────────────────────────────────────
 from __future__ import annotations
 import sys, os
-
-# Add repo root to Python module path to locate "shared"
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # ──────────────────────────────────────────────────────────────
 # Imports
 # ──────────────────────────────────────────────────────────────
+import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import streamlit as st
 
 from shared.theme import set_page_config, academic_header, ACCENT_COLOR
 
 # ──────────────────────────────────────────────────────────────
-# Page & layout setup
+# Page Setup
 # ──────────────────────────────────────────────────────────────
 set_page_config()
 
 academic_header(
-    title="📈 Predictive Analytics — Diversification of Risk",
-    subtitle="Modern Portfolio Theory example using assets S and T "
-             "(Watson & Head, 2023)."
+    "📈 Predictive Analytics — Diversification Dashboard",
+    "Live efficient frontier from editable annual return data (Watson & Head, 2023)."
 )
 
 st.caption(
-    "GenAI Accounting Analytics Toolkit · Predictive Module · "
-    "This app is for educational illustration only and does not "
-    "constitute investment advice."
+    "GenAI Accounting Analytics Toolkit · Predictive module · Live dashboard"
 )
 
 # ──────────────────────────────────────────────────────────────
-# Sidebar – context and options
+# Sidebar Notes
 # ──────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("About this Module")
+    st.header("About this Dashboard")
     st.markdown(
         """
-        This example uses **historic annual returns** to estimate:
+        This dashboard demonstrates **Modern Portfolio Theory**:
 
-        - Mean (expected) return  
-        - Volatility (standard deviation)  
-        - Correlation  
-        - Portfolio risk under different weightings  
+        ✔ Mean return  
+        ✔ Volatility (σ)  
+        ✔ Correlation (ρ)  
+        ✔ Portfolio risk (σₚ)  
 
-        Follows the approach used in **Watson & Head (2023),
-        Corporate Finance**, in the chapter on Risk and Return.
+        Edit the data table — the efficient frontier updates automatically.
         """
     )
     st.markdown("---")
-    st.markdown("**Input Mode**")
-    data_choice = st.radio(
-        "Choose data source:",
-        ["Use Watson & Head test data", "Enter my own 5-year returns"],
-        index=0,
-    )
-    st.markdown("---")
-    st.markdown("**Instructions**")
+    st.markdown("**Reference**")
     st.markdown(
         """
-        1. Choose a data source  
-        2. If entering custom values, supply 5 returns for each asset  
-        3. Click **Run Analysis**  
-        4. Review the efficient frontier and notes  
+        Watson, D. & Head, A. (2023).  
+        *Corporate Finance* (8th Ed.).
         """
     )
 
 # ──────────────────────────────────────────────────────────────
-# Step 1 – Input Data
+# STEP 1 — Editable Input Table
 # ──────────────────────────────────────────────────────────────
-st.subheader("Step 1 – Input Data")
+st.subheader("📌 Step 1 — Input/Modify Annual Returns (%)")
 
-watson_head_data = pd.DataFrame({
-    "S return (%)": [6.6, 5.6, -9.0, 12.6, 14.0],
-    "T return (%)": [24.5, -5.9, 19.9, -7.8, 14.8],
+default_df = pd.DataFrame({
+    "S": [6.6, 5.6, -9.0, 12.6, 14.0],
+    "T": [24.5, -5.9, 19.9, -7.8, 14.8],
 })
 
-if data_choice == "Use Watson & Head test data":
-    st.markdown("Default dataset from **Watson & Head (2023)**.")
-    st.dataframe(watson_head_data, use_container_width=True)
-    df = watson_head_data.rename(columns={"S return (%)": "S", "T return (%)": "T"}).copy()
-else:
-    st.markdown("Enter your own **5 annual returns (%)** for each asset:")
-    df = st.data_editor(
-        pd.DataFrame({"S": [None] * 5, "T": [None] * 5}),
-        num_rows="fixed",
-        use_container_width=True,
-    )
+df = st.data_editor(default_df, use_container_width=True)
+df_dec = df.astype(float) / 100.0  # convert % → decimals
 
 # ──────────────────────────────────────────────────────────────
-# Helper functions
+# COMPUTATIONS — Auto recalculation with every change
 # ──────────────────────────────────────────────────────────────
-def clean_and_convert(df_raw: pd.DataFrame) -> pd.DataFrame:
-    """Drop missing values and convert % returns to decimals."""
-    df_clean = df_raw.dropna()
-    if df_clean.empty:
-        raise ValueError("No valid data provided — please complete the table.")
-    return df_clean.astype(float) / 100.0
+def compute(df):
+    mean_s = df["S"].mean()
+    mean_t = df["T"].mean()
+    sd_s = df["S"].std(ddof=0)
+    sd_t = df["T"].std(ddof=0)
+    corr = df["S"].corr(df["T"])
+    return mean_s, mean_t, sd_s, sd_t, corr
 
+mean_s, mean_t, sd_s, sd_t, corr = compute(df_dec)
 
-def compute_asset_stats(df_dec: pd.DataFrame) -> dict:
-    """Compute mean, standard deviation and correlation."""
-    mean_s = df_dec["S"].mean()
-    mean_t = df_dec["T"].mean()
-    sd_s = df_dec["S"].std(ddof=0)  # population standard deviation
-    sd_t = df_dec["T"].std(ddof=0)
-    corr = df_dec["S"].corr(df_dec["T"])
-    return {
-        "mean_s": mean_s, "mean_t": mean_t,
-        "sd_s": sd_s, "sd_t": sd_t,
-        "corr": corr,
-    }
+# Portfolio weights for discrete view
+weights = [(1,0),(0.8,0.2),(0.6,0.4),(0.4,0.6),(0.2,0.8),(0,1)]
+labels = ["100% S","80/20","60/40","40/60","20/80","100% T"]
 
+def port_calc(w_s, w_t):
+    ret = w_s*mean_s + w_t*mean_t
+    var = (w_s**2 * sd_s**2
+           + w_t**2 * sd_t**2
+           + 2*w_s*w_t*sd_s*sd_t*corr)
+    return ret, np.sqrt(var)
 
-def portfolio_return_sd(
-    w_s: float, w_t: float, mean_s: float, mean_t: float,
-    sd_s: float, sd_t: float, corr: float
-) -> tuple[float, float]:
-    """Return (expected return, standard deviation) for a two-asset portfolio."""
-    ret = w_s * mean_s + w_t * mean_t
-    var = (
-        w_s**2 * sd_s**2
-        + w_t**2 * sd_t**2
-        + 2 * w_s * w_t * sd_s * sd_t * corr
-    )
-    return ret, float(np.sqrt(var))
+rows, sd_vals = [], []
+for (w_s, w_t), label in zip(weights, labels):
+    r, s = port_calc(w_s, w_t)
+    rows.append([label, r*100, s*100])
+    sd_vals.append(s)
 
+table_df = pd.DataFrame(rows, columns=["Portfolio","Mean return (%)","Std dev (%)"])
 
 # ──────────────────────────────────────────────────────────────
-# Step 2 – Run Analysis
+# STEP 2 & 3 — Table + Slider Side-by-side
 # ──────────────────────────────────────────────────────────────
-st.subheader("Step 2 – Run Analysis")
-run = st.button("Run Analysis", type="primary")
+left, right = st.columns([1.1, 1.3])
 
-if run:
-    try:
-        df_dec = clean_and_convert(df)
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
-
-    stats = compute_asset_stats(df_dec)
-    mean_s, mean_t = stats["mean_s"], stats["mean_t"]
-    sd_s, sd_t = stats["sd_s"], stats["sd_t"]
-    corr = stats["corr"]
-
-    st.success("✔ Calculation complete.")
-
-    # Summary statistics
-    st.markdown("### Asset Statistics")
-    summary = pd.DataFrame(
-        {
-            "Mean return (%)": [f"{mean_s * 100:.2f}", f"{mean_t * 100:.2f}"],
-            "Standard deviation (%)": [f"{sd_s * 100:.2f}", f"{sd_t * 100:.2f}"],
-        },
-        index=["S", "T"],
-    )
-    st.dataframe(summary, use_container_width=True)
-    st.metric("Correlation coefficient (r)", f"{corr:.2f}")
-
-    # Portfolios
-    st.subheader("Step 3 – Portfolio Risk and Return")
-
-    weights = [
-        (1.0, 0.0), (0.8, 0.2), (0.6, 0.4),
-        (0.4, 0.6), (0.2, 0.8), (0.0, 1.0)
-    ]
-    labels = ["100% S", "80/20", "60/40", "40/60", "20/80", "100% T"]
-
-    rows = []
-    sd_values = []
-    for (w_s, w_t), label in zip(weights, labels, strict=True):
-        r, s = portfolio_return_sd(w_s, w_t, mean_s, mean_t, sd_s, sd_t, corr)
-        rows.append([label, f"{r * 100:.2f}", f"{s * 100:.2f}"])
-        sd_values.append(s)
-
-    table_df = pd.DataFrame(rows, columns=["Portfolio", "Mean return (%)", "Standard deviation (%)"])
+with left:
+    st.subheader("📋 Step 2 — Portfolio Table")
     st.dataframe(table_df, use_container_width=True)
 
-    # Plot
-    st.subheader("Step 4 – Efficient Frontier (Discrete Example)")
-    x = table_df["Standard deviation (%)"].astype(float)
-    y = table_df["Mean return (%)"].astype(float)
+with right:
+    st.subheader("🎚 Step 3 — Explore Portfolio Weights")
 
-    fig, ax = plt.subplots(figsize=(7, 5))
-    ax.plot(x, y, marker="o", linestyle="-", color=ACCENT_COLOR)
+    weight_slider = st.slider(
+        "Weight allocated to Asset S (remaining goes to T)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.5,
+        step=0.05,
+        format="%.2f"
+    )
 
-    for i, row in table_df.iterrows():
-        ax.annotate(row["Portfolio"], (x.iloc[i], y.iloc[i]), fontsize=8, xytext=(5, 3), textcoords="offset points")
+    w_s = weight_slider
+    w_t = 1 - weight_slider
 
-    ax.set_xlabel("Risk (standard deviation, %)")
-    ax.set_ylabel("Expected return (%)")
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.7)
-    st.pyplot(fig)
+    sel_ret, sel_sd = port_calc(w_s, w_t)
 
-    # Diversification
-    st.subheader("Step 5 – Diversification Benefit")
-    min_risk = min(sd_values) * 100
     st.info(
-        f"📉 Minimum portfolio risk observed: **{min_risk:.2f}%** "
-        f"\n(compared to S = {sd_s*100:.2f}%, T = {sd_t*100:.2f}%)"
+        f"""
+        **Selected Portfolio Mix:**  
+        - S Weight: **{w_s:.2f}**
+        - T Weight: **{w_t:.2f}**
+
+        **Expected Return:** {sel_ret*100:.2f}%  
+        **Risk (Std Dev):** {sel_sd*100:.2f}%
+        """
     )
 
 # ──────────────────────────────────────────────────────────────
-# Methodology Notes
+# STEP 4 — Chart with Slider Pointer
+# ──────────────────────────────────────────────────────────────
+st.subheader("📈 Step 4 — Efficient Frontier")
+
+x = table_df["Std dev (%)"]
+y = table_df["Mean return (%)"]
+
+fig, ax = plt.subplots(figsize=(6, 5))
+
+# Plot discrete frontier points
+ax.plot(x, y, marker="o", linestyle="-", color=ACCENT_COLOR, label="Frontier Points")
+
+# Plot slider-selected point
+ax.scatter(sel_sd*100, sel_ret*100, color="red", s=120, zorder=5, label="Your Selection")
+
+ax.set_xlabel("Risk (σ, %)")
+ax.set_ylabel("Expected Return (%)")
+ax.grid(True, linestyle="--", linewidth=0.5)
+ax.legend()
+st.pyplot(fig)
+
+# ──────────────────────────────────────────────────────────────
+# STEP 5 — Diversification Insight
+# ──────────────────────────────────────────────────────────────
+st.subheader("💡 Step 5 — Diversification Insight")
+min_risk = min(sd_vals) * 100
+
+st.success(
+    f"📉 Minimum observed portfolio risk: **{min_risk:.2f}%** "
+    f"(vs S = {sd_s*100:.2f}%, T = {sd_t*100:.2f}%)"
+)
+
+# ──────────────────────────────────────────────────────────────
+# FORMULAS + REFERENCES
 # ──────────────────────────────────────────────────────────────
 with st.expander("📎 Methodology & Notes (Formulas + References)"):
     st.markdown(
         r"""
-        ### Statistical Measures
-        
-        - Mean return:
-          \[
-          \mu = \frac{1}{n}\sum_{i=1}^{n} R_i
-          \]
-        
-        - Population standard deviation:
-          \[
-          \sigma = \sqrt{\frac{1}{n}\sum_{i=1}^{n}(R_i - \mu)^2}
-          \]
-        
-        - Correlation:
-          \[
-          \rho_{S,T}=\frac{\mathrm{Cov}(R_S, R_T)}{\sigma_S \sigma_T}
-          \]
-        
-        ### Two-Asset Portfolio
-        
-        - Expected return:
-          \[
-          E(R_P)=w_S\mu_S+w_T\mu_T
-          \]
-        
-        - Portfolio variance:
-          \[
-          \sigma_P^2=w_S^2\sigma_S^2+w_T^2\sigma_T^2+2w_Sw_T\sigma_S\sigma_T\rho_{S,T}
-          \]
-        
-        - Standard deviation:
-          \[
-          \sigma_P=\sqrt{\sigma_P^2}
-          \]
-        
-        ### References
-        
-        - Watson, D. & Head, A. (2023). *Corporate Finance* (8th ed.). Pearson Education.
-        - This module was co-created by **Alastair McBride** and a **Generative AI Assistant**, with full prompt documentation in `docs/prompt_record.md`.
+        ### Two-Asset Portfolio (Watson & Head, 2023)
+        \[
+        E(R_P) = w_S\mu_S + w_T\mu_T
+        \]
+        \[
+        \sigma_P = \sqrt{
+        w_S^2\sigma_S^2 + w_T^2\sigma_T^2 + 2w_Sw_T\sigma_S\sigma_T\rho_{S,T}}
+        \]
+        **Reference:** Watson, D. & Head, A. (2023). *Corporate Finance (8th Ed.)*.
         """
     )
