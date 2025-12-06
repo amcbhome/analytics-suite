@@ -1,7 +1,7 @@
 """
 GenAI Accounting Analytics Toolkit — Predictive Analytics Dashboard (Altair)
 Interactive efficient frontier with editable returns, weight slider,
-and Altair hover panel.
+and hover detail panel.
 
 Author: Alastair McBride & GenAI Assistant
 """
@@ -9,7 +9,7 @@ Author: Alastair McBride & GenAI Assistant
 from __future__ import annotations
 import sys, os
 
-# Ensure we can import shared utilities when run on Streamlit Cloud
+# Ensure we can import shared utilities (for Streamlit Cloud)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
@@ -46,7 +46,7 @@ def portfolio_point(mean_s, mean_t, sd_s, sd_t, corr, w_s: float):
 
 
 # ──────────────────────────────────────────────────────────────
-# Page setup
+# Page layout
 # ──────────────────────────────────────────────────────────────
 set_page_config()
 
@@ -88,7 +88,7 @@ with st.sidebar:
     )
 
 # ──────────────────────────────────────────────────────────────
-# Step 1 – Editable input table
+# Step 1 – Editable Input Table
 # ──────────────────────────────────────────────────────────────
 st.subheader("📌 Step 1 — Input / modify annual returns (%)")
 
@@ -106,7 +106,7 @@ df_dec = df.astype(float) / 100.0  # % → decimal
 mean_s, mean_t, sd_s, sd_t, corr = compute_stats(df_dec)
 
 # ──────────────────────────────────────────────────────────────
-# Step 2 – Discrete teaching portfolios
+# Step 2 – Discrete Portfolios (teaching table)
 # ──────────────────────────────────────────────────────────────
 weights_discrete = [1.0, 0.8, 0.6, 0.4, 0.2, 0.0]
 labels_discrete = ["100% S", "80/20", "60/40", "40/60", "20/80", "100% T"]
@@ -128,7 +128,7 @@ with left:
     st.dataframe(table_df, use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────
-# Step 3 – Weight slider for S
+# Step 3 – Slider to Select Weight of S
 # ──────────────────────────────────────────────────────────────
 with right:
     st.subheader("🎚 Step 3 — Set S/T mix")
@@ -158,7 +158,7 @@ with right:
     )
 
 # ──────────────────────────────────────────────────────────────
-# Step 4 – Build continuous frontier data for Altair
+# Step 4 – Continuous Frontier Data (for Altair curve)
 # ──────────────────────────────────────────────────────────────
 fine_weights = np.linspace(0.0, 1.0, 201)
 frontier_rows = []
@@ -175,7 +175,7 @@ for w in fine_weights:
 
 frontier_df = pd.DataFrame(frontier_rows)
 
-# Add formatted label for hover panel
+# Text label for hover panel
 frontier_df["hover_label"] = (
     "σ = "
     + frontier_df["Std dev (%)"].round(2).astype(str)
@@ -185,7 +185,7 @@ frontier_df["hover_label"] = (
     + frontier_df["w_S"].round(2).astype(str)
 )
 
-# Data for slider-selected point (single row)
+# One-row dataframe for slider point
 selected_df = pd.DataFrame(
     {
         "w_S": [w_s_slider],
@@ -196,11 +196,11 @@ selected_df = pd.DataFrame(
 )
 
 # ──────────────────────────────────────────────────────────────
-# Altair chart: smooth curve + slider point + hover panel
+# Altair Chart — Smooth Curve + Slider Point + Hover Panel
 # ──────────────────────────────────────────────────────────────
 st.subheader("📈 Step 4 — Efficient frontier (Altair)")
 
-# Selection: nearest point on curve by mouseover
+# Hover selection
 hover = alt.selection_point(
     fields=["w_S"],
     nearest=True,
@@ -210,52 +210,37 @@ hover = alt.selection_point(
 
 base = alt.Chart(frontier_df).properties(width=420, height=320)
 
-# Smooth efficient frontier line
-line = base.mark_line().encode(
+# Smooth frontier line
+line = base.mark_line(color=ACCENT_COLOR, strokeWidth=2).encode(
     x=alt.X("Std dev (%):Q", title="Risk (σ, %)"),
     y=alt.Y("Mean return (%):Q", title="Expected return (%)"),
 )
 
-# Points for hover interaction
-points = base.mark_point(size=40).encode(
+# Hoverable small points
+points = base.mark_point(size=20, color=ACCENT_COLOR).encode(
     x="Std dev (%):Q",
     y="Mean return (%):Q",
-    tooltip=[
-        alt.Tooltip("w_S:Q", format=".2f", title="Weight in S"),
-        alt.Tooltip("Std dev (%):Q", format=".2f", title="Risk (σ, %)"),
-        alt.Tooltip("Mean return (%):Q", format=".2f", title="Return (%)"),
-    ],
 ).add_params(hover)
 
-# Highlight point under cursor
-hover_points = points.transform_filter(hover).encode(size=alt.value(80))
+# Highlight hovered point
+hover_points = points.transform_filter(hover).encode(size=alt.value(60))
 
 # Slider-selected point (red)
 sel_point = (
     alt.Chart(selected_df)
-    .mark_point(color="red", size=120)
-    .encode(
-        x="Std dev (%):Q",
-        y="Mean return (%):Q",
-        tooltip=[
-            alt.Tooltip("w_S:Q", format=".2f", title="Slider w_S"),
-            alt.Tooltip("Std dev (%):Q", format=".2f", title="Slider σ"),
-            alt.Tooltip("Mean return (%):Q", format=".2f", title="Slider R"),
-        ],
-    )
+    .mark_point(color="red", size=140)
+    .encode(x="Std dev (%):Q", y="Mean return (%):Q")
 )
 
 curve_chart = (line + points + hover_points + sel_point).properties(
     title="Efficient frontier (two-asset mix)"
 )
 
-# Hover detail panel to the right (floating-style card)
+# Floating-style hover detail box
 hover_panel = (
     alt.Chart(frontier_df)
     .mark_text(align="left", baseline="top")
-    .encode(
-        text="hover_label:N",
-    )
+    .encode(text="hover_label:N")
     .transform_filter(hover)
     .properties(width=240, height=80)
 )
@@ -264,18 +249,19 @@ hover_background = alt.Chart(pd.DataFrame({"x": [0]})).mark_rect(
     fill="#FFFFFF", stroke="#CCCCCC", cornerRadius=8
 ).encode().properties(width=260, height=100)
 
-info_panel = (hover_background + hover_panel).properties(
-    title="Hover details"
-)
+# ❗ FIX: Use alt.layer, NOT "+"
+info_panel = alt.layer(
+    hover_background,
+    hover_panel
+).properties(title="Hover details")
 
-full_chart = alt.hconcat(curve_chart, info_panel).resolve_scale(
-    y="shared"
-)
+# Final layout (side-by-side chart + hover panel)
+full_chart = alt.hconcat(curve_chart, info_panel).resolve_scale(y="shared")
 
 st.altair_chart(full_chart, use_container_width=False)
 
 # ──────────────────────────────────────────────────────────────
-# Step 5 – Diversification insight
+# Step 5 — Diversification Insight
 # ──────────────────────────────────────────────────────────────
 st.subheader("💡 Step 5 — Diversification insight")
 
@@ -287,7 +273,7 @@ st.success(
 )
 
 # ──────────────────────────────────────────────────────────────
-# Methodology & notes
+# Methodology & Notes
 # ──────────────────────────────────────────────────────────────
 with st.expander("📎 Methodology & Notes (formulas + references)"):
     st.markdown(
@@ -317,16 +303,9 @@ with st.expander("📎 Methodology & Notes (formulas + references)"):
         Here, the frontier is generated for weights \( w_S \in [0, 1] \),
         with \( w_T = 1 - w_S \).
 
-        ### Interpretation
-
-        - The **smooth curve** shows the continuum of feasible portfolios
-          for S/T mixtures under the estimated correlation.  
-        - The **red marker** reflects the weight chosen by the slider.  
-        - The **hover panel** displays the risk, return and weight for the
-          nearest point under the cursor.
-
         ### Reference
 
         Watson, D. & Head, A. (2023). *Corporate Finance* (8th ed.). Pearson.
         """
     )
+
